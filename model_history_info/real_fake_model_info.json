@@ -1,0 +1,11 @@
+{
+  "model": "EfficientNet-B0 + Custom Head",
+  "task": "Real vs Fake Image Classification",
+  "test_accuracy": 0.9652777777777778,
+  "test_f1": 0.9652627008250109,
+  "best_val_acc": 0.9861111111111112,
+  "classes": [
+    "FAKE",
+    "REAL"
+  ]
+}
