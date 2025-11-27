@@ -1,227 +1,202 @@
-# 🌪️ DisasterScope AI v2  
-### Multimodal Disaster Detection, Image Authenticity Verification & Geolocated Severity Mapping
+# 🌪️ DisasterScope AI v2
+### Multimodal Disaster Detection • Image Authenticity Verification • Geolocated Severity Mapping
 
 ---
 
 ## 📘 Project Overview
-**DisasterScope AI v2** is an end-to-end multimodal disaster analysis system that processes both **disaster images** and **tweet text** to generate rapid, reliable, and interpretable insights during disaster events.  
-It is designed to counter misinformation, detect real disasters, and provide map‑based severity alerts.
+
+**DisasterScope AI v2** is an end-to-end multimodal disaster intelligence system that analyzes both **images** and **tweets** to detect real disasters, counter misinformation, and generate severity-based geolocated alerts.
 
 The system performs:
-
-- Real vs Fake Image Detection (EfficientNet‑B0)  
-- Disaster Type Classification (Transformer-based)  
-- Tweet Cleaning & Severity Extraction  
-- Location Extraction using dictionary, regex, and geocoding  
-- Image-Based Damage Assessment  
-- Fusion of text + image severity  
-- Interactive Folium Map Generation  
-- Severity-Based Alerts  
+- **Real vs Fake Image Detection** (EfficientNet-B0)
+- **Disaster Tweet Classification** (DistilBERT fine-tuned on disaster tweets)
+- **Tweet Cleaning & Severity Extraction**
+- **Location Extraction + Geocoding**
+- **Image Damage Analysis (CV-based)**
+- **Multimodal Fusion (Image + Text Severity)**
+- **Interactive Folium Map & Heatmap Generation**
 
 ---
 
 ## 🏗 System Architecture
 
+The core system processes image and text inputs in parallel before fusing the severity scores:
+
 ```
-Image → Preprocessing → Authenticity Check → Damage Analysis → Image Severity
-Tweet → Cleaning → Disaster Type → Severity + Location → Text Severity
-                      ↓
-               Severity Fusion
-                      ↓
-       Final Severity + Heatmap + Interactive Map
+
 ```
+IMAGE PIPELINE                             TEXT PIPELINE
+```
+
+┌────────────────────────┐               ┌──────────────────────────┐
+│ Image Upload           │               │ Tweet Text Input         │
+└───────────────┬────────┘               └───────────────┬──────────┘
+↓                                        ↓
+Preprocessing (PIL / OpenCV)                 Text Cleaning
+↓                                        ↓
+Authenticity Check (EfficientNet)         DistilBERT Classification
+↓                                        ↓
+Damage Analysis (edges / texture)           Severity Extraction
+↓                                        ↓
+Image Severity                           Location Extraction
+└──────────────┬───────────────┬────────┘
+\              /
+\            /
+\          /
+↓
+Severity Fusion
+↓
+Final Severity • Heatmap • Interactive Folium Map
+
+```
+
 
 ---
 
 ## 🔍 Key Features
 
-### **1. Image Authenticity Detection**
-- Backbone: **EfficientNet‑B0**
-- Output: REAL / FAKE / UNCERTAIN  
-- Test Accuracy: **96.5%**
-- Balanced dataset (480 real + 480 fake images)
+### 1. Image Authenticity Detection
+- **Backbone:** EfficientNet-B0 (`timm`)
+- **Output:** `REAL` / `FAKE` (and `UNCERTAIN` threshold)
+- **Training data:**
+    - Real images: Natural Disaster Image Dataset (Kaggle) — earthquake, flood, wildfire, cyclone classes
+    - Fake images: AI-generated via Stable Diffusion v1.5 (120 per class)
+- **Approach:** custom classification head on EfficientNet features, mixed precision training, augmentations
+- **Artifacts saved:** `models/real_fake_classifier.pt`, `outputs/confusion_matrix_real_fake.png`, `outputs/training_history_real_fake.png`
 
-### **2. Transformer-Based Text Classification**
-Two modes are supported:
-- **Zero‑shot classification** using `facebook/bart-large-mnli`
-- **Optional DistilBERT mini‑trained classifier (.pt)**
+### 2. Text Classification (DistilBERT)
+- **Model:** `distilbert-base-uncased` fine-tuned for 4-way disaster classification
+- **Classes:** `earthquake`, `flood`, `wildfire`, `hurricane`
+- **Datasets used:**
+    - Kaggle `nlp-getting-started` (real disaster tweets, filtered `target==1`)
+    - CrisisLex-style curated/augmented disaster samples (to balance & increase variety)
+- **Training details:** tokenization max_length=128, stratified train/test split, Trainer API (Hugging Face), 3 epochs (example)
+- **Artifacts saved:** `models/distilbert_disaster_classifier/` (tokenizer + model files)
 
-Labels:
-- Earthquake  
-- Flood  
-- Wildfire  
-- Hurricane  
-- Unknown  
+### 3. Hybrid / Fallback Logic
+- **Primary:** DistilBERT prediction with confidence score
+- **Fallback:** keyword-based classifier when DistilBERT confidence < threshold (e.g., 0.7)
+- *This ensures robust predictions for short/ambiguous tweets.*
 
-### **3. Text Cleaning & Severity Extraction**
-Severity Levels:
-- **HIGH**  
-- **MEDIUM**  
-- **LOW**
+### 4. Location Extraction & Geocoding
+- **Strategy:** 23+ predefined known locations (fast path) + regex pattern matching + Geopy (Nominatim) fallback
+- **Returns:** location name, latitude, longitude, confidence
 
-Based on keyword scoring.
+### 5. Severity Estimation & Damage Analysis
+- **Text severity:** keyword scoring (HIGH/MEDIUM/LOW)
+- **Image severity:** edge density (Canny), texture variance, color cues (fire/flood indicators)
+- **Fusion:** average / rule-based fusion of text and image severity for final alert level
 
-### **4. Location Extraction**
-Uses:
-- Predefined dictionary of 23+ global locations  
-- Regex-based extraction  
-- Fallback: GeoPy Nominatim geocoding  
-
-### **5. Image Damage Analysis**
-Computer vision techniques:
-- Canny edge density  
-- Texture variance  
-- Color region detection (fire/smoke/water indicators)  
-
-Produces:
-- Damage severity  
-- Heatmap visualization  
-
-### **6. Multimodal Fusion**
-Fuses:
-- Image severity  
-- Text severity  
-
-Final Output:
-- Final severity (H/M/L)  
-- Interactive map  
-- Alert description  
+### 6. Mapping & Alerts
+- **Interactive maps:** Folium with radius zones (`RED` / `ORANGE` / `YELLOW`) based on severity
+- **Heatmaps:** 3-panel visualization (original, intensity map, overlay)
+- **Alerts:** severity-based messages (`Evacuate` / `Prepare` / `Monitor`)
 
 ---
 
-## 🗺 Features in the Output UI
-
-- **Interactive Folium Map**
-  - Red Zone → Critical  
-  - Orange Zone → Warning  
-  - Yellow Zone → Caution  
-  - Marker showing coordinates, severity, and disaster type  
-
-- **Heatmap Visualization**
-  - Original image  
-  - Damage intensity  
-  - Overlay  
-
-- **Alert Generator**
-  - Critical / Warning / Advisory messages
-
----
-
-## 📂 Project Structure
+## 🗂 Project Structure (recommended)
 
 ```
+
 DisasterScopeAI/
-│
+├── app.py
+├── requirements.txt
+├── README.md
 ├── models/
-│   ├── real_fake_classifier.pt
-│   └── distilbert_disaster.pt (optional)
-│
+│   ├── real\_fake\_classifier.pt
+│   └── distilbert\_disaster\_classifier/  \# tokenizer + model (optional)
+├── outputs/
+│   ├── confusion\_matrix\_real\_fake.png
+│   └── training\_history\_real\_fake.png
 ├── data/
 │   ├── raw/
-│   └── fake_disaster_images/
-│
-├── outputs/
-│   ├── heatmaps/
-│   └── disaster_map.html
-│
-├── app.py  (Streamlit interface)
-├── requirements.txt
-└── README.md
-```
+│   └── fake\_disaster\_images/
+├── src/
+│   ├── real\_fake\_classifier.py
+│   ├── text\_classifier.py
+│   └── utils.py
+└── notebooks/
 
----
+````
 
-## 🧪 Datasets Used
-
-### **Real Images**
-- Natural Disaster Image Dataset (Kaggle)
-- Classes: Earthquake, Flood, Wildfire, Cyclone
-- ~3300 images available, 480 used for balanced training
-
-### **Fake Images**
-- Generated using Stable Diffusion v1.5  
-- 120 per class → 480 total  
+> **Note:** Avoid uploading full datasets or large model files (>100MB) to GitHub. Use Git LFS, Hugging Face Hub, or GitHub Releases for large artifacts.
 
 ---
 
 ## 📦 Installation
 
-### **1. Clone the Repository**
-```
+```bash
 git clone <repo-url>
 cd DisasterScopeAI
-```
-
-### **2. Install Dependencies**
-```
+python -m venv venv
+# activate venv: Windows: venv\Scriptsctivate  |  Mac/Linux: source venv/bin/activate
 pip install -r requirements.txt
+````
+
+**Suggested `requirements.txt` highlights:**
+
+```
+torch
+torchvision
+timm
+transformers
+datasets
+Pillow
+numpy
+opencv-python
+folium
+streamlit
+geopy
+scikit-learn
+matplotlib
+seaborn
 ```
 
----
+## 🚀 Run (Local Demo)
 
-## 🚀 Running the Application
+Start the Streamlit interface:
 
-### **Start Streamlit App**
-```
+```bash
 streamlit run app.py
 ```
 
-Uploads:
-- A disaster image  
-- A corresponding tweet  
+**Outputs:**
 
-System outputs:
-- Real/Fake prediction  
-- Disaster type + confidence  
-- Severity (text, image, combined)  
-- Heatmaps  
-- Interactive map  
+  - Real / Fake prediction + confidence
+  - Disaster type + confidence (DistilBERT)
+  - Severity (text, image, fused)
+  - Damage heatmap and interactive Folium map
 
----
+-----
 
-## 🧠 Technical Stack
+## 🧪 Model Training Notes (summary for reviewer)
 
-### **Machine Learning**
-- PyTorch  
-- timm (EfficientNet-B0)  
-- Transformers (DistilBERT / BART-MNLI)  
+  - **DistilBERT:** fine-tuned on combined Kaggle & curated crisis dataset; training script included at `src/text_classifier.py`. Example metrics from fine-tuning shown in notebook.
+  - **Real vs Fake CNN:** trained EfficientNet-B0 backbone with custom head; training script at `src/real_fake_classifier.py`; checkpoint saved as `models/real_fake_classifier.pt`.
+  - Limited GPU access constrained fake image generation to 480 samples; balanced sampling and augmentation used during training to mitigate class-size differences. Larger-scale re-training is possible and documented in `notebooks/`.
 
-### **Computer Vision**
-- OpenCV  
-- NumPy  
-- Pillow  
+-----
 
-### **Mapping**
-- Folium  
-- GeoPy  
+## 🧾 Reproducibility & Artifacts
 
-### **Web Interface**
-- Streamlit  
-- streamlit‑folium  
+Included in repo (or via release / HF link if file size large):
 
----
+  - Training scripts (`src/*.py`) and notebooks
+  - Trained checkpoint(s) (or download link)
+  - Evaluation artifacts: confusion matrices, training curves, classification reports
+  - `README` with quick-start and dataset descriptions
 
-## ⚙️ Future Improvements
-
-- Fine‑tuning DistilBERT on larger disaster datasets  
-- Multi-language tweet support  
-- Satellite image support  
-- Real-time Twitter API integration  
-- Mobile app deployment  
-
----
+-----
 
 ## 👥 Contributors
 
-- **Arpita Sethi**  
-- **Manya Singh**  
-- Course: UML501  
-- Institution: Thapar Institute of Engineering & Technology  
+  - Arpita Sethi
+  - Manya Singh
 
----
+Course: UML501 — Thapar Institute of Engineering and Technology
 
-## 📄 License
-This project is for academic use only.  
-Commercial use requires permission.
+-----
 
----
+## 📝 License
+
+Academic use only. For commercial use contact the authors.
