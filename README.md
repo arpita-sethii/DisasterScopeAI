@@ -22,32 +22,186 @@ The system performs:
 
 The core system processes image and text inputs in parallel before fusing the severity scores:
 ```
-IMAGE PIPELINE                             TEXT PIPELINE
-┌────────────────────────┐               ┌──────────────────────────┐
-│ Image Upload           │               │ Tweet Text Input         │
-└───────────────┬────────┘               └───────────────┬──────────┘
-                ↓                                        ↓
-        Preprocessing (PIL / OpenCV)                 Text Cleaning
-                ↓                                        ↓
-    ┌───────────────────────────┐              DistilBERT Classification
-    │ Authenticity Check        │                       ↓
-    │ - CNN (EfficientNet-B0)   │              Severity Extraction
-    │ - Heuristic Artifact      │                       ↓
-    │   Detection               │              Location Extraction
-    └───────────┬───────────────┘                       │
-                ↓                                        │
-        Damage Analysis                                  │
-        (edges / texture)                                │
-                ↓                                        │
-        Image Severity                                   │
-                └──────────────┬───────────────┬─────────┘
-                               \               /
-                                \             /
-                                 \           /
-                                  ↓         ↓
-                              Severity Fusion
-                                     ↓
-        Final Severity • Heatmap • Interactive Folium Map
+┌─────────────────────────────────────────────────────────────────┐
+│                    USER INPUT                                    │
+│            (Upload Image + Enter Tweet/Description)             │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           ▼
+              ┌────────────────────────┐
+              │  DUAL PIPELINE SPLIT   │
+              └───────┬────────┬───────┘
+                      │        │
+        ┌─────────────┘        └─────────────┐
+        │                                     │
+        ▼                                     ▼
+┌───────────────────┐              ┌──────────────────────┐
+│   TEXT PIPELINE   │              │   IMAGE PIPELINE     │
+└───────────────────┘              └──────────────────────┘
+        │                                     │
+        ▼                                     ▼
+┌───────────────────┐              ┌──────────────────────┐
+│  1. Text Cleaning │              │  1. Preprocessing    │
+│  - Remove URLs    │              │  - Resize 224×224    │
+│  - Remove @       │              │  - Normalize         │
+│  - Remove #       │              │  - To Tensor         │
+└─────────┬─────────┘              └──────────┬───────────┘
+          │                                   │
+          ▼                                   ▼
+┌───────────────────┐              ┌──────────────────────┐
+│  2. Disaster Type │              │  2. CNN Auth Check   │
+│  Classification   │              │  EfficientNet-B0     │
+│  ───────────────  │              │  Real/Fake probs     │
+│  A) DistilBERT    │              └──────────┬───────────┘
+│     (Primary)     │                         │
+│     - 66M params  │                         ▼
+│     - 4 classes   │              ┌──────────────────────┐
+│     - Confidence  │              │  3. Heuristic Check  │
+│                   │              │  - Dimensions        │
+│  B) Keyword-based │              │  - Sensor noise      │
+│     (Fallback)    │              │  - Color analysis    │
+│     if conf<70%   │              │  - Texture analysis  │
+│                   │              │  - 9/16 threshold    │
+│  Classes:         │              └──────────┬───────────┘
+│  - Earthquake     │                         │
+│  - Flood          │                         ▼
+│  - Wildfire       │              ┌──────────────────────┐
+│  - Hurricane      │              │  4. Auth Decision    │
+└─────────┬─────────┘              │  Combined CNN +      │
+          │                        │  Heuristics Vote     │
+          ▼                        │  ─────────────────   │
+┌───────────────────┐              │  REAL / FAKE /       │
+│  3. Location      │              │  VERIFIED            │
+│  Extraction       │              └──────────┬───────────┘
+│  ─────────────    │                         │
+│  - 150+ locations │              ┌──────────┴──────────┐
+│  - Pattern match  │              │                     │
+│  - Return lat/lng │              ▼                     ▼
+└─────────┬─────────┘    ┌────────────────┐    ┌────────────────┐
+          │              │  If FAKE:      │    │  If REAL/      │
+          ▼              │  ─────────     │    │  VERIFIED:     │
+┌───────────────────┐    │  Display:      │    │  ─────────     │
+│  4. Text Severity │    │  - Warning     │    │  Continue      │
+│  Keyword Analysis │    │  - Stop here   │    │  Processing    │
+│  ─────────────    │    └────────────────┘    └────────┬───────┘
+│  Keywords:        │                                   │
+│  - HIGH: massive, │                                   ▼
+│    destroyed,     │                        ┌──────────────────────┐
+│    deaths, etc    │                        │  5. Damage Analysis  │
+│  - LOW: minor,    │                        │  (Computer Vision)   │
+│    contained      │                        │  ───────────────     │
+│  - Else: MEDIUM   │                        │  - Canny edges       │
+└─────────┬─────────┘                        │  - Texture variance  │
+          │                                  │  - Edge density      │
+          │                                  │  - Damage severity   │
+          │                                  └──────────┬───────────┘
+          │                                             │
+          │                                             ▼
+          │                                  ┌──────────────────────┐
+          │                                  │  6. Image Severity   │
+          │                                  │  Edge-based:         │
+          │                                  │  ───────────         │
+          │                                  │  >15%: HIGH          │
+          │                                  │  >8%:  MEDIUM        │
+          │                                  │  <8%:  LOW           │
+          │                                  └──────────┬───────────┘
+          │                                             │
+          └─────────────────┬───────────────────────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │  SEVERITY FUSION     │
+                 │  ────────────────    │
+                 │  Average:            │
+                 │  (Text Sev + Image   │
+                 │   Severity) / 2      │
+                 │                      │
+                 │  Final: HIGH/MED/LOW │
+                 └──────────┬───────────┘
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │   OUTPUT GENERATION  │
+                 └──────────┬───────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              │             │             │
+              ▼             ▼             ▼
+    ┌─────────────┐ ┌──────────────┐ ┌──────────────┐
+    │  Emergency  │ │    Damage    │ │ Interactive  │
+    │    Alert    │ │   Heatmap    │ │     Map      │
+    │  ─────────  │ │  ──────────  │ │  ──────────  │
+    │  HIGH:      │ │  3-Panel:    │ │  Folium:     │
+    │  Evacuate!  │ │  - Original  │ │  - RED zone  │
+    │             │ │  - Intensity │ │  - ORANGE    │
+    │  MEDIUM:    │ │  - Overlay   │ │  - YELLOW    │
+    │  Stay alert │ │              │ │              │
+    │             │ │  Colormap:   │ │  Marker at   │
+    │  LOW:       │ │  Green→Red   │ │  epicenter   │
+    │  Monitor    │ │              │ │              │
+    └──────┬──────┘ └──────┬───────┘ └──────┬───────┘
+           │               │                │
+           └───────────────┼────────────────┘
+                           │
+                           ▼
+                ┌──────────────────────┐
+                │   DISPLAY RESULTS    │
+                │  ────────────────    │
+                │  Streamlit Interface │
+                │  ───────────────     │
+                │  - Authenticity      │
+                │  - Disaster type     │
+                │  - Location + coords │
+                │  - Severity level    │
+                │  - Damage heatmap    │
+                │  - Interactive map   │
+                │  - Emergency alert   │
+                └──────────────────────┘
+                           │
+                           ▼
+                         [END]
+
+═══════════════════════════════════════════════════════════════════
+
+LEGEND:
+━━━━━━ : Main Flow
+┌────┐ : Process/Operation
+◇      : Decision Point
+[    ] : Terminal (Start/End)
+═══════ : Section Separator
+
+═══════════════════════════════════════════════════════════════════
+
+KEY COMPONENTS:
+
+TEXT PIPELINE:
+├─ DistilBERT Classifier (Primary)
+│  ├─ Model: distilbert-base-uncased
+│  ├─ Parameters: 66M
+│  ├─ Training: Fine-tuned on disaster tweets
+│  └─ Output: 4-class prediction with confidence
+│
+└─ Keyword Classifier (Fallback)
+   ├─ Triggers: When DistilBERT confidence < 70%
+   └─ Method: Rule-based pattern matching
+
+IMAGE PIPELINE:
+├─ CNN Classifier
+│  ├─ Model: EfficientNet-B0
+│  ├─ Training: 480 real + 480 fake images
+│  └─ Output: Real/Fake probabilities
+│
+└─ Heuristic Detector
+   ├─ Method: Computer vision analysis
+   ├─ Checks: 6 indicators (dimensions, noise, etc)
+   └─ Threshold: 9/16 indicators = FAKE
+
+FUSION LAYER:
+└─ Combines text severity + image severity
+   └─ Generates final output with all components
+
+═══════════════════════════════════════════════════════════════════
+                               
 ```
 
 ---
